@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orbit Hop</title>
+<style>
+:root{--bg:#070914;--fg:#eef0ff;--mut:#8b90b8;--acc:#ffd166;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#070914}}
+:root[data-theme="dark"]{--bg:#070914}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;user-select:none;-webkit-user-select:none}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+.hud{position:fixed;left:0;right:0;top:env(safe-area-inset-top,0px);display:flex;justify-content:space-between;padding:14px 18px;pointer-events:none;font-variant-numeric:tabular-nums}
+.sc{font-size:42px;font-weight:700;line-height:1}
+.best{font-size:13px;color:var(--mut);text-align:right}
+.msg{position:fixed;left:0;right:0;top:38%;text-align:center;pointer-events:none;padding:0 20px}
+.msg h1{font-size:34px;margin:0 0 8px;letter-spacing:.04em}
+.msg p{margin:4px 0;color:var(--mut);font-size:15px}
+.msg b{color:var(--acc)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud"><div class="sc" id="sc">0</div><div class="best">BEST <span id="best">0</span></div></div>
+<div class="msg" id="msg"><h1>ORBIT HOP</h1><p>You orbit a planet. <b>Tap</b> to launch in a straight line.</p><p>Get captured by the next planet. Miss it and you drift away.</p><p style="margin-top:14px">Tap to start</p></div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+let W,H,dpr,sc;
+function size(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);sc=Math.min(W,H*0.75)/520}
+addEventListener('resize',size);size();
+
+let best=0;try{best=+localStorage.getItem('orbithop')||0}catch(e){}
+document.getElementById('best').textContent=best;
+
+let ac;function beep(f,d,v){try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();
+  o.type='triangle';o.frequency.setValueAtTime(f,ac.currentTime);o.frequency.exponentialRampToValueAtTime(f*1.6,ac.currentTime+d);
+  g.gain.setValueAtTime(v,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+d)}catch(e){}}
+
+const OMEGA=2.7,SPEED=330;
+let planets,P,cur,score,state='ready',cam,trail,parts,lockT,freeT,overAt=0,shake=0;
+
+function mk(prev,i){
+  const a=-Math.PI/2+(Math.random()-.5)*1.7,d=210+Math.random()*110+Math.min(i*3,90);
+  const r=16+Math.random()*20;
+  return{x:prev.x+Math.cos(a)*d,y:prev.y+Math.sin(a)*d,r,R:r+30,hue:(i*47)%360,i};
+}
+function reset(){
+  planets=[{x:0,y:0,r:26,R:60,hue:200,i:0}];planets.push(mk(planets[0],1));planets.push(mk(planets[1],2));
+  cur=planets[0];P={a:-Math.PI/2,dir:1,x:0,y:-60,vx:0,vy:0,orbit:true};
+  score=0;trail=[];parts=[];lockT=0;freeT=0;cam={x:0,y:-120};shake=0;
+  document.getElementById('sc').textContent=0;
+}
+reset();
+
+function burst(x,y,hue,n){for(let i=0;i<n;i++){const a=Math.random()*6.28,s=40+Math.random()*120;parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:1,hue})}}
+
+function tap(){
+  if(state==='ready'){state='play';document.getElementById('msg').style.display='none';return}
+  if(state==='over'){if(performance.now()-overAt>450){reset();state='play';document.getElementById('msg').style.display='none'}return}
+  if(P.orbit){
+    // tangent direction
+    const tx=-Math.sin(P.a)*P.dir,ty=Math.cos(P.a)*P.dir;
+    P.vx=tx*SPEED;P.vy=ty*SPEED;P.orbit=false;lockT=.35;freeT=0;beep(330,.15,.12);
+  }
+}
+addEventListener('pointerdown',e=>{e.preventDefault();tap()});
+addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='Enter'){e.preventDefault();tap()}});
+
+function gameOver(){
+  state='over';overAt=performance.now();shake=.5;burst(P.x,P.y,0,30);beep(120,.5,.2);
+  if(score>best){best=score;try{localStorage.setItem('orbithop',best)}catch(e){}document.getElementById('best').textContent=best}
+  const m=document.getElementById('msg');m.style.display='block';
+  m.innerHTML=`<h1>${score}</h1><p>${score>=best&&score>0?'New best!':'Best: '+best}</p><p style="margin-top:14px">Tap to retry</p>`;
+}
+
+const stars=Array.from({length:70},()=>({x:Math.random(),y:Math.random(),z:.1+Math.random()*.3,r:Math.random()*1.3+.3}));
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(.04,(now-last)/1000);last=now;
+  if(state==='play'){
+    lockT-=dt;
+    if(P.orbit){
+      P.a+=OMEGA*P.dir*dt;P.x=cur.x+Math.cos(P.a)*cur.R;P.y=cur.y+Math.sin(P.a)*cur.R;
+    }else{
+      P.x+=P.vx*dt;P.y+=P.vy*dt;freeT+=dt;
+      for(const pl of planets){
+        if(pl===cur&&lockT>0)continue;
+        const dx=P.x-pl.x,dy=P.y-pl.y,d=Math.hypot(dx,dy);
+        if(d<=pl.R+10){
+          P.orbit=true;P.a=Math.atan2(dy,dx);
+          P.dir=Math.sign(dx*P.vy-dy*P.vx)||1; // cross product gives spin direction
+          cur=pl;burst(P.x,P.y,pl.hue,14);
+          if(pl.i>score){score=pl.i;document.getElementById('sc').textContent=score;beep(520+score*12,.18,.14)}
+          while(planets[planets.length-1].i<cur.i+2)planets.push(mk(planets[planets.length-1],planets.length));
+          break;
+        }
+      }
+      if(!P.orbit&&(freeT>3.2||Math.hypot(P.x-cur.x,P.y-cur.y)>620))gameOver();
+    }
+    trail.push({x:P.x,y:P.y,l:1});
+  }
+  for(const t of trail)t.l-=dt*1.6;while(trail.length&&trail[0].l<=0)trail.shift();
+  for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.l-=dt*1.4;if(p.l<=0)parts.splice(i,1)}
+  // camera
+  const tx=cur.x,ty=cur.y-60;cam.x+=(tx-cam.x)*Math.min(1,dt*3.2);cam.y+=(ty-cam.y)*Math.min(1,dt*3.2);
+  shake=Math.max(0,shake-dt);
+
+  // draw
+  ctx.fillStyle='#070914';ctx.fillRect(0,0,W,H);
+  stars.forEach(s=>{const x=((s.x*W-cam.x*s.z*sc)%W+W)%W,y=((s.y*H-cam.y*s.z*sc)%H+H)%H;ctx.globalAlpha=.25+s.z;ctx.fillStyle='#fff';ctx.fillRect(x,y,s.r,s.r)});
+  ctx.globalAlpha=1;
+  const sx=shake>0?(Math.random()-.5)*10*shake:0,sy=shake>0?(Math.random()-.5)*10*shake:0;
+  const X=x=>(x-cam.x)*sc+W/2+sx,Y=y=>(y-cam.y)*sc+H*.6+sy;
+  for(const pl of planets){
+    const px=X(pl.x),py=Y(pl.y);if(py<-200||py>H+200)continue;
+    // orbit ring
+    ctx.strokeStyle=`hsla(${pl.hue},70%,70%,${pl===cur?.35:.15})`;ctx.lineWidth=1.5;ctx.setLineDash([4,6]);
+    ctx.beginPath();ctx.arc(px,py,pl.R*sc,0,6.28);ctx.stroke();ctx.setLineDash([]);
+    const g=ctx.createRadialGradient(px-pl.r*sc*.3,py-pl.r*sc*.3,2,px,py,pl.r*sc);
+    g.addColorStop(0,`hsl(${pl.hue},75%,72%)`);g.addColorStop(1,`hsl(${pl.hue},65%,35%)`);
+    ctx.shadowColor=`hsl(${pl.hue},80%,60%)`;ctx.shadowBlur=18;ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(px,py,pl.r*sc,0,6.28);ctx.fill();ctx.shadowBlur=0;
+  }
+  // aim line
+  if(state==='play'&&P.orbit){
+    const tx=-Math.sin(P.a)*P.dir,ty=Math.cos(P.a)*P.dir;
+    ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=1.5;ctx.setLineDash([3,7]);
+    ctx.beginPath();ctx.moveTo(X(P.x),Y(P.y));ctx.lineTo(X(P.x)+tx*260*sc,Y(P.y)+ty*260*sc);ctx.stroke();ctx.setLineDash([]);
+  }
+  for(const t of trail){ctx.globalAlpha=Math.max(0,t.l)*.6;ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(X(t.x),Y(t.y),3.5*sc*t.l+.5,0,6.28);ctx.fill()}
+  for(const p of parts){ctx.globalAlpha=Math.max(0,p.l);ctx.fillStyle=`hsl(${p.hue},90%,70%)`;ctx.beginPath();ctx.arc(X(p.x),Y(p.y),2.2,0,6.28);ctx.fill()}
+  ctx.globalAlpha=1;
+  if(state!=='over'){ctx.shadowColor='#ffd166';ctx.shadowBlur=16;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(X(P.x),Y(P.y),5.5*Math.max(sc,.7),0,6.28);ctx.fill();ctx.shadowBlur=0}
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
